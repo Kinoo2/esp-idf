@@ -339,6 +339,13 @@ static int esp_tls_low_level_conn(const char *hostname, int hostlen, int port, c
     /* falls through */
     case ESP_TLS_HANDSHAKE:
         ESP_LOGD(TAG, "handshake in progress...");
+
+#if defined(HAVE_SNI)
+        ESP_LOGD(TAG, "\n\n Calling wolfSSL_CTX_UseSNI \n\n...");
+        wolfSSL_CTX_UseSNI((WOLFSSL_CTX *)tls->priv_ctx, 0, hostname, (word16) XSTRLEN (hostname));
+#else
+        ESP_LOGD(TAG, "\n\n Skipping wolfSSL_CTX_UseSNI \n\n...");
+#endif
         return esp_tls_handshake(tls, cfg);
         break;
     case ESP_TLS_FAIL:
