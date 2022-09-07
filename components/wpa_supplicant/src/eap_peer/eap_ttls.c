@@ -11,7 +11,7 @@
 #ifdef EAP_TTLS
 #include "utils/common.h"
 #include "crypto/sha1.h"
-#include "tls/tls.h"
+#include "tls.h"
 #include "eap_peer/eap.h"
 #include "eap_peer/eap_ttls.h"
 #include "eap_peer/mschapv2.h"
@@ -75,8 +75,8 @@ static void * eap_ttls_init(struct eap_sm *sm)
 		return NULL;
 	data->ttls_version = EAP_TTLS_VERSION;
 	data->phase2_type = EAP_TTLS_PHASE2_MSCHAPV2;
-	
-/*	
+
+/*
     selected = "MSCHAPV2";
 	if (config && config->phase2) {
 		if (os_strstr(config->phase2, "autheap=")) {
@@ -359,7 +359,7 @@ static int eap_ttls_phase2_request(struct eap_sm *sm,
 		}
 
 		if (eap_get_config_password(sm, &len) == NULL) {
-			wpa_printf(MSG_ERROR, "EAP-TTLS: Password not configured\n"); 
+			wpa_printf(MSG_ERROR, "EAP-TTLS: Password not configured\n");
 			printf("[Debug] Return because no password  EAP_TTLS_PHASE2_MSCHAPV2 EAP_TTLS_PHASE2_MSCHAP\n");
 			return 0;
 		}
@@ -976,7 +976,7 @@ static int eap_ttls_process_handshake(struct eap_sm *sm,
 }
 
 
-static void eap_ttls_check_auth_status(struct eap_sm *sm, 
+static void eap_ttls_check_auth_status(struct eap_sm *sm,
 			   struct eap_ttls_data *data,
 			   struct eap_method_ret *ret)
 {

@@ -1,3 +1,4 @@
+#include <sys/errno.h>
 /*
  * AES SIV (RFC 5297)
  * Copyright (c) 2013 Cozybit, Inc.
@@ -6,12 +7,12 @@
  * See README for more details.
  */
 
-#include "utils/includes.h"
-#include "utils/common.h"
+#include "includes.h"
 
-#include "crypto/aes.h"
-#include "crypto/aes_wrap.h"
-#include "crypto/aes_siv.h"
+#include "common.h"
+#include "aes.h"
+#include "aes_wrap.h"
+#include "aes_siv.h"
 
 
 static const u8 zero[AES_BLOCK_SIZE];
@@ -97,7 +98,7 @@ static int aes_s2v(const u8 *key, size_t key_len,
 	if (len[i] >= AES_BLOCK_SIZE) {
 		buf = os_memdup(addr[i], len[i]);
 		if (!buf)
-			return -1;
+			return -ENOMEM;
 
 		xorend(buf, len[i], tmp, AES_BLOCK_SIZE);
 		data[0] = buf;

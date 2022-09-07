@@ -9,7 +9,35 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#if defined(__ets__)
+#endif /* ets */
 #include "os.h"
+#include "esp_bit_defs.h"
+
+/* Define platform specific variable type macros */
+#if defined(ESP_PLATFORM)
+#include <stdint.h>
+typedef uint64_t u64;
+typedef uint32_t u32;
+typedef uint16_t u16;
+typedef uint8_t u8;
+typedef int64_t s64;
+typedef int32_t s32;
+typedef int16_t s16;
+typedef int8_t s8;
+#endif /*ESP_PLATFORM*/
+
+#if defined(__XTENSA__)
+#include <machine/endian.h>
+#define __BYTE_ORDER     BYTE_ORDER
+#define __LITTLE_ENDIAN  LITTLE_ENDIAN
+#define __BIG_ENDIAN     BIG_ENDIAN
+#endif /*__XTENSA__*/
+
+#if defined(__linux__) || defined(__GLIBC__) || defined(__ets__)
+#include <endian.h>
+#include <byteswap.h>
+#endif /* __linux__ */
 
 #if defined(__linux__) || defined(__GLIBC__)
 #include <endian.h>
@@ -17,9 +45,11 @@
 #endif /* __linux__ */
 
 #if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__DragonFly__) || \
-    defined(__OpenBSD__)
+    defined(__OpenBSD__) || defined(ESP_PLATFORM)
 #include <sys/types.h>
+#ifndef  ESP_PLATFORM
 #include <sys/endian.h>
+#endif
 #define __BYTE_ORDER	_BYTE_ORDER
 #define	__LITTLE_ENDIAN	_LITTLE_ENDIAN
 #define	__BIG_ENDIAN	_BIG_ENDIAN
@@ -594,5 +624,7 @@ void * __hide_aliasing_typecast(void *foo);
 #else /* CONFIG_VALGRIND */
 #define WPA_MEM_DEFINED(ptr, len) do { } while (0)
 #endif /* CONFIG_VALGRIND */
+
+#define IANA_SECP256R1 19
 
 #endif /* COMMON_H */

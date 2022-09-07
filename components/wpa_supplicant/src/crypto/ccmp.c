@@ -159,7 +159,7 @@ u8 * ccmp_decrypt(const u8 *tk, const u8 *hdr, const u8 *data,
 	wpa_hexdump(MSG_DEBUG, "CCMP nonce", nonce, 13);
 
 	if (aes_ccm_ad(tk, 16, nonce, 8, data + 8, mlen, aad, aad_len,
-                   data + 8 + mlen, plain, espnow_pkt ? true : false) < 0) {
+                   data + 8 + mlen, plain) < 0) {
 		os_free(plain);
 		return NULL;
 	}
@@ -294,7 +294,7 @@ u8 * ccmp_256_decrypt(const u8 *tk, const u8 *hdr, const u8 *data,
 	wpa_hexdump(MSG_DEBUG, "CCMP-256 nonce", nonce, 13);
 
 	if (aes_ccm_ad(tk, 32, nonce, 16, data + 8, mlen, aad, aad_len,
-		       data + 8 + mlen, plain, false) < 0) {
+		       data + 8 + mlen, plain) < 0) {
 		os_free(plain);
 		return NULL;
 	}

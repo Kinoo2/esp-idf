@@ -7,8 +7,14 @@
  */
 
 #include "includes.h"
-#include <wolfssl/options.h>
-#include <wolfssl/wolfcrypt/sha.h>
+
+#if defined(CONFIG_ESP_TLS_USING_WOLFSSL)
+    //#include <esp-wolfssl/wolfssl/options.h>
+    #include <wolfssl/wolfcrypt/sha.h>
+#else
+    #include <wolfssl/options.h>
+    #include <wolfssl/wolfcrypt/sha.h>
+#endif
 
 #include "common.h"
 #include "crypto.h"

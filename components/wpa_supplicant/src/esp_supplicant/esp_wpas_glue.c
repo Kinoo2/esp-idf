@@ -19,6 +19,7 @@
 #include "common/eapol_common.h"
 #include "rsn_supp/wpa.h"
 #include "rsn_supp/pmksa_cache.h"
+#include "l2_packet/l2_packet.h"
 
 u8   *wpa_sm_alloc_eapol(struct wpa_sm *sm, u8 type,
                          const void *data, u16 data_len,

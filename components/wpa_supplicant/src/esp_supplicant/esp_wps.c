@@ -30,6 +30,9 @@
 #include "esp_wifi.h"
 #include "esp_err.h"
 #include "esp_private/wifi.h"
+#include "esp_wps.h"
+
+#include "esp_wps_i.h"
 
 #define API_MUTEX_TAKE() do {\
     if (!s_wps_api_lock) {\
@@ -410,7 +413,7 @@ struct wps_data *wps_init(void)
                         data->dev_password, data->dev_password_len);
         do {
             char tmpp[9];
-            os_bzero(tmpp, 9);
+            os_bzero(tmpp, 9); //
             memcpy(tmpp, data->dev_password, 8);
             wpa_printf(MSG_DEBUG, "WPS PIN [%s]", tmpp);
             wifi_event_sta_wps_er_pin_t evt;
@@ -940,9 +943,9 @@ int wps_stop_process(wifi_event_sta_wps_fail_reason_t reason_code)
     sm->discover_ssid_cnt = 0;
     sm->wps->state = SEND_M1;
     os_bzero(sm->bssid, ETH_ALEN);
-    os_bzero(sm->ssid, sizeof(sm->ssid));
-    os_bzero(sm->ssid_len, sizeof(sm->ssid_len));
-    os_bzero((u8 *)&sm->config, sizeof(wifi_sta_config_t));
+//    os_bzero(sm->ssid, sizeof(sm->ssid));
+//    os_bzero(sm->ssid_len, sizeof(sm->ssid_len));
+//    os_bzero((u8 *)&sm->config, sizeof(wifi_sta_config_t));
     sm->ap_cred_cnt = 0;
 
     esp_wifi_disarm_sta_connection_timer_internal();
@@ -952,7 +955,7 @@ int wps_stop_process(wifi_event_sta_wps_fail_reason_t reason_code)
     esp_wifi_disconnect();
 
     wpa_printf(MSG_DEBUG, "Write wps_fail_information");
-    
+
     esp_event_send_internal(WIFI_EVENT, WIFI_EVENT_STA_WPS_ER_FAILED, &reason_code, sizeof(reason_code), portMAX_DELAY);
 
     return ESP_OK;
@@ -1940,7 +1943,7 @@ int wps_task_init(void)
         goto _wps_no_mem;
     }
 
-    os_bzero(s_wps_sig_cnt, SIG_WPS_NUM);
+    //os_bzero(s_wps_sig_cnt, SIG_WPS_NUM);
     s_wps_queue = xQueueCreate(SIG_WPS_NUM, sizeof( void * ) );
     if (!s_wps_queue) {
         wpa_printf(MSG_ERROR, "wps task init: failed to alloc queue");

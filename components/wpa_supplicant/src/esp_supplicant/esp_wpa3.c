@@ -60,7 +60,7 @@ static esp_err_t wpa3_build_sae_commit(u8 *bssid)
     }
 
     pw = (const u8 *)esp_wifi_sta_get_prof_password_internal();
-    if (sae_prepare_commit(own_addr, bssid, pw, strlen((const char *)pw), NULL, &g_sae_data) < 0) {
+    if (sae_prepare_commit(own_addr, bssid, pw, strlen((const char *)pw), &g_sae_data) < 0) {
         wpa_printf(MSG_ERROR, "wpa3: failed to prepare SAE commit!");
         return ESP_FAIL;
     }

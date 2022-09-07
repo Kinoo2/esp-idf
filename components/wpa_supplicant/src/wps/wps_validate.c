@@ -5,11 +5,12 @@
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
  */
+
 #include "utils/includes.h"
 
 #include "utils/common.h"
-#include "wps/wps_i.h"
-#include "wps/wps.h"
+#include "wps_i.h"
+#include "wps.h"
 
 
 #ifndef WPS_STRICT_ALL
@@ -95,11 +96,22 @@ static int wps_validate_response_type(const u8 *response_type, int mandatory)
 
 static int valid_config_methods(u16 val, int wps2)
 {
-#ifndef CONFIG_WPA_WPS_WARS
 	if (wps2) {
+		if ((val & 0x6000) && !(val & WPS_CONFIG_DISPLAY)) {
+			wpa_printf(MSG_INFO, "WPS-STRICT: Physical/Virtual "
+				   "Display flag without old Display flag "
+				   "set");
+			return 0;
+		}
 		if (!(val & 0x6000) && (val & WPS_CONFIG_DISPLAY)) {
 			wpa_printf(MSG_INFO, "WPS-STRICT: Display flag "
 				   "without Physical/Virtual Display flag");
+			return 0;
+		}
+		if ((val & 0x0600) && !(val & WPS_CONFIG_PUSHBUTTON)) {
+			wpa_printf(MSG_INFO, "WPS-STRICT: Physical/Virtual "
+				   "PushButton flag without old PushButton "
+				   "flag set");
 			return 0;
 		}
 		if (!(val & 0x0600) && (val & WPS_CONFIG_PUSHBUTTON)) {
@@ -109,7 +121,6 @@ static int valid_config_methods(u16 val, int wps2)
 		}
 	}
 
-#endif
 	return 1;
 }
 
@@ -213,6 +224,8 @@ static int wps_validate_rf_bands(const u8 *rf_bands, int mandatory)
 		return 0;
 	}
 	if (*rf_bands != WPS_RF_24GHZ && *rf_bands != WPS_RF_50GHZ &&
+	    *rf_bands != WPS_RF_60GHZ &&
+	    *rf_bands != (WPS_RF_24GHZ | WPS_RF_50GHZ | WPS_RF_60GHZ) &&
 	    *rf_bands != (WPS_RF_24GHZ | WPS_RF_50GHZ)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid Rf Bands "
 			   "attribute value 0x%x", *rf_bands);
@@ -256,7 +269,7 @@ static int wps_validate_config_error(const u8 *config_error, int mandatory)
 		return 0;
 	}
 	val = WPA_GET_BE16(config_error);
-	if (val > 18) {
+	if (val > 20) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid Configuration Error "
 			   "attribute value 0x%04x", val);
 		return -1;
@@ -279,7 +292,7 @@ static int wps_validate_dev_password_id(const u8 *dev_password_id,
 		return 0;
 	}
 	val = WPA_GET_BE16(dev_password_id);
-	if (val >= 0x0006 && val <= 0x000f) {
+	if (val >= 0x0008 && val <= 0x000f) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid Device Password ID "
 			   "attribute value 0x%04x", val);
 		return -1;
@@ -1014,52 +1027,37 @@ static int wps_validate_network_key_shareable(const u8 *val, int mandatory)
 
 static int wps_validate_cred(const u8 *cred, size_t len)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	struct wpabuf buf;
-	int ret;
 
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
-
-	if (cred == NULL) {
-		ret = -1;
-		goto _out;
-	}
+	if (cred == NULL)
+		return -1;
 	wpabuf_set(&buf, cred, len);
-	if (wps_parse_msg(&buf, attr) < 0) {
+	if (wps_parse_msg(&buf, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse Credential");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	if (wps_validate_network_idx(attr->network_idx, 1) ||
-	    wps_validate_ssid(attr->ssid, attr->ssid_len, 1) ||
-	    wps_validate_auth_type(attr->auth_type, 1) ||
-	    wps_validate_encr_type(attr->encr_type, 1) ||
-	    wps_validate_network_key_index(attr->network_key_idx, 0) ||
-	    wps_validate_network_key(attr->network_key, attr->network_key_len,
-				     attr->encr_type, 1) ||
-	    wps_validate_mac_addr(attr->mac_addr, 1) ||
-	    wps_validate_network_key_shareable(attr->network_key_shareable, 0))
+	if (wps_validate_network_idx(attr.network_idx, 1) ||
+	    wps_validate_ssid(attr.ssid, attr.ssid_len, 1) ||
+	    wps_validate_auth_type(attr.auth_type, 1) ||
+	    wps_validate_encr_type(attr.encr_type, 1) ||
+	    wps_validate_network_key_index(attr.network_key_idx, 0) ||
+	    wps_validate_network_key(attr.network_key, attr.network_key_len,
+				     attr.encr_type, 1) ||
+	    wps_validate_mac_addr(attr.mac_addr, 1) ||
+	    wps_validate_network_key_shareable(attr.network_key_shareable, 0))
 	{
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid Credential");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
 
-	return ret;
+	return 0;
 }
 
 
-static int wps_validate_credential(const u8 *cred[], size_t len[], size_t num,
+static int wps_validate_credential(const u8 *cred[], u16 len[], size_t num,
 				   int mandatory)
 {
 	size_t i;
@@ -1084,1282 +1082,896 @@ static int wps_validate_credential(const u8 *cred[], size_t len[], size_t num,
 
 int wps_validate_beacon(const struct wpabuf *wps_ie)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2, sel_reg;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (wps_ie == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No WPS IE in Beacon frame");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(wps_ie, attr) < 0) {
+	if (wps_parse_msg(wps_ie, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse WPS IE in "
 			   "Beacon frame");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	sel_reg = attr->selected_registrar != NULL &&
-		*attr->selected_registrar != 0;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_wps_state(attr->wps_state, 1) ||
-	    wps_validate_ap_setup_locked(attr->ap_setup_locked, 0) ||
-	    wps_validate_selected_registrar(attr->selected_registrar, 0) ||
-	    wps_validate_dev_password_id(attr->dev_password_id, sel_reg) ||
-	    wps_validate_sel_reg_config_methods(attr->sel_reg_config_methods,
+	wps2 = attr.version2 != NULL;
+	sel_reg = attr.selected_registrar != NULL &&
+		*attr.selected_registrar != 0;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_wps_state(attr.wps_state, 1) ||
+	    wps_validate_ap_setup_locked(attr.ap_setup_locked, 0) ||
+	    wps_validate_selected_registrar(attr.selected_registrar, 0) ||
+	    wps_validate_dev_password_id(attr.dev_password_id, sel_reg) ||
+	    wps_validate_sel_reg_config_methods(attr.sel_reg_config_methods,
 						wps2, sel_reg) ||
-	    wps_validate_uuid_e(attr->uuid_e, 0) ||
-	    wps_validate_rf_bands(attr->rf_bands, 0) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_authorized_macs(attr->authorized_macs,
-					 attr->authorized_macs_len, 0)) {
+	    wps_validate_uuid_e(attr.uuid_e, 0) ||
+	    wps_validate_rf_bands(attr.rf_bands, 0) ||
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_authorized_macs(attr.authorized_macs,
+					 attr.authorized_macs_len, 0)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid Beacon frame");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_beacon_probe_resp(const struct wpabuf *wps_ie, int probe,
 				   const u8 *addr)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2, sel_reg;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (wps_ie == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No WPS IE in "
 			   "%sProbe Response frame", probe ? "" : "Beacon/");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(wps_ie, attr) < 0) {
+	if (wps_parse_msg(wps_ie, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse WPS IE in "
 			   "%sProbe Response frame", probe ? "" : "Beacon/");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	sel_reg = attr->selected_registrar != NULL &&
-		*attr->selected_registrar != 0;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_wps_state(attr->wps_state, 1) ||
-	    wps_validate_ap_setup_locked(attr->ap_setup_locked, 0) ||
-	    wps_validate_selected_registrar(attr->selected_registrar, 0) ||
-	    wps_validate_dev_password_id(attr->dev_password_id, sel_reg) ||
-	    wps_validate_sel_reg_config_methods(attr->sel_reg_config_methods,
+	wps2 = attr.version2 != NULL;
+	sel_reg = attr.selected_registrar != NULL &&
+		*attr.selected_registrar != 0;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_wps_state(attr.wps_state, 1) ||
+	    wps_validate_ap_setup_locked(attr.ap_setup_locked, 0) ||
+	    wps_validate_selected_registrar(attr.selected_registrar, 0) ||
+	    wps_validate_dev_password_id(attr.dev_password_id, sel_reg) ||
+	    wps_validate_sel_reg_config_methods(attr.sel_reg_config_methods,
 						wps2, sel_reg) ||
-	    wps_validate_response_type(attr->response_type, probe) ||
-	    wps_validate_uuid_e(attr->uuid_e, probe) ||
-	    wps_validate_manufacturer(attr->manufacturer, attr->manufacturer_len,
+	    wps_validate_response_type(attr.response_type, probe) ||
+	    wps_validate_uuid_e(attr.uuid_e, probe) ||
+	    wps_validate_manufacturer(attr.manufacturer, attr.manufacturer_len,
 				      probe) ||
-	    wps_validate_model_name(attr->model_name, attr->model_name_len,
+	    wps_validate_model_name(attr.model_name, attr.model_name_len,
 				    probe) ||
-	    wps_validate_model_number(attr->model_number, attr->model_number_len,
+	    wps_validate_model_number(attr.model_number, attr.model_number_len,
 				      probe) ||
-	    wps_validate_serial_number(attr->serial_number,
-				       attr->serial_number_len, probe) ||
-	    wps_validate_primary_dev_type(attr->primary_dev_type, probe) ||
-	    wps_validate_dev_name(attr->dev_name, attr->dev_name_len, probe) ||
-	    wps_validate_ap_config_methods(attr->config_methods, wps2, probe) ||
-	    wps_validate_rf_bands(attr->rf_bands, 0) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_authorized_macs(attr->authorized_macs,
-					 attr->authorized_macs_len, 0)) {
+	    wps_validate_serial_number(attr.serial_number,
+				       attr.serial_number_len, probe) ||
+	    wps_validate_primary_dev_type(attr.primary_dev_type, probe) ||
+	    wps_validate_dev_name(attr.dev_name, attr.dev_name_len, probe) ||
+	    wps_validate_ap_config_methods(attr.config_methods, wps2, probe) ||
+	    wps_validate_rf_bands(attr.rf_bands, 0) ||
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_authorized_macs(attr.authorized_macs,
+					 attr.authorized_macs_len, 0)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid %sProbe Response "
 			   "frame from " MACSTR, probe ? "" : "Beacon/",
 			   MAC2STR(addr));
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_probe_req(const struct wpabuf *wps_ie, const u8 *addr)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (wps_ie == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No WPS IE in "
 			   "Probe Request frame");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(wps_ie, attr) < 0) {
+	if (wps_parse_msg(wps_ie, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse WPS IE in "
 			   "Probe Request frame");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_request_type(attr->request_type, 1) ||
-	    wps_validate_config_methods(attr->config_methods, wps2, 1) ||
-	    wps_validate_uuid_e(attr->uuid_e, attr->uuid_r == NULL) ||
-	    wps_validate_uuid_r(attr->uuid_r, attr->uuid_e == NULL) ||
-	    wps_validate_primary_dev_type(attr->primary_dev_type, 1) ||
-	    wps_validate_rf_bands(attr->rf_bands, 1) ||
-	    wps_validate_assoc_state(attr->assoc_state, 1) ||
-	    wps_validate_config_error(attr->config_error, 1) ||
-	    wps_validate_dev_password_id(attr->dev_password_id, 1) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_manufacturer(attr->manufacturer, attr->manufacturer_len,
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_request_type(attr.request_type, 1) ||
+	    wps_validate_config_methods(attr.config_methods, wps2, 1) ||
+	    wps_validate_uuid_e(attr.uuid_e, attr.uuid_r == NULL) ||
+	    wps_validate_uuid_r(attr.uuid_r, attr.uuid_e == NULL) ||
+	    wps_validate_primary_dev_type(attr.primary_dev_type, 1) ||
+	    wps_validate_rf_bands(attr.rf_bands, 1) ||
+	    wps_validate_assoc_state(attr.assoc_state, 1) ||
+	    wps_validate_config_error(attr.config_error, 1) ||
+	    wps_validate_dev_password_id(attr.dev_password_id, 1) ||
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_manufacturer(attr.manufacturer, attr.manufacturer_len,
 				      wps2) ||
-	    wps_validate_model_name(attr->model_name, attr->model_name_len,
+	    wps_validate_model_name(attr.model_name, attr.model_name_len,
 				    wps2) ||
-	    wps_validate_model_number(attr->model_number, attr->model_number_len,
+	    wps_validate_model_number(attr.model_number, attr.model_number_len,
 				      wps2) ||
-	    wps_validate_dev_name(attr->dev_name, attr->dev_name_len, wps2) ||
-	    wps_validate_request_to_enroll(attr->request_to_enroll, 0) ||
-	    wps_validate_req_dev_type(attr->req_dev_type, attr->num_req_dev_type,
+	    wps_validate_dev_name(attr.dev_name, attr.dev_name_len, wps2) ||
+	    wps_validate_request_to_enroll(attr.request_to_enroll, 0) ||
+	    wps_validate_req_dev_type(attr.req_dev_type, attr.num_req_dev_type,
 				      0)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid Probe Request "
 			   "frame from " MACSTR, MAC2STR(addr));
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_assoc_req(const struct wpabuf *wps_ie)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (wps_ie == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No WPS IE in "
 			   "(Re)Association Request frame");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(wps_ie, attr) < 0) {
+	if (wps_parse_msg(wps_ie, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse WPS IE in "
 			   "(Re)Association Request frame");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_request_type(attr->request_type, 1) ||
-	    wps_validate_version2(attr->version2, wps2)) {
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_request_type(attr.request_type, 1) ||
+	    wps_validate_version2(attr.version2, wps2)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid (Re)Association "
 			   "Request frame");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_assoc_resp(const struct wpabuf *wps_ie)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
-
 
 	if (wps_ie == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No WPS IE in "
 			   "(Re)Association Response frame");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(wps_ie, attr) < 0) {
+	if (wps_parse_msg(wps_ie, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse WPS IE in "
 			   "(Re)Association Response frame");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_response_type(attr->response_type, 1) ||
-	    wps_validate_version2(attr->version2, wps2)) {
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_response_type(attr.response_type, 1) ||
+	    wps_validate_version2(attr.version2, wps2)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid (Re)Association "
 			   "Response frame");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	ret = 0;
-_out:
-	if(attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m1(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
-
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M1");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M1");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_uuid_e(attr->uuid_e, 1) ||
-	    wps_validate_mac_addr(attr->mac_addr, 1) ||
-	    wps_validate_enrollee_nonce(attr->enrollee_nonce, 1) ||
-	    wps_validate_public_key(attr->public_key, attr->public_key_len, 1) ||
-	    wps_validate_auth_type_flags(attr->auth_type_flags, 1) ||
-	    wps_validate_encr_type_flags(attr->encr_type_flags, 1) ||
-	    wps_validate_conn_type_flags(attr->conn_type_flags, 1) ||
-	    wps_validate_config_methods(attr->config_methods, wps2, 1) ||
-	    wps_validate_wps_state(attr->wps_state, 1) ||
-	    wps_validate_manufacturer(attr->manufacturer, attr->manufacturer_len,
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_uuid_e(attr.uuid_e, 1) ||
+	    wps_validate_mac_addr(attr.mac_addr, 1) ||
+	    wps_validate_enrollee_nonce(attr.enrollee_nonce, 1) ||
+	    wps_validate_public_key(attr.public_key, attr.public_key_len, 1) ||
+	    wps_validate_auth_type_flags(attr.auth_type_flags, 1) ||
+	    wps_validate_encr_type_flags(attr.encr_type_flags, 1) ||
+	    wps_validate_conn_type_flags(attr.conn_type_flags, 1) ||
+	    wps_validate_config_methods(attr.config_methods, wps2, 1) ||
+	    wps_validate_wps_state(attr.wps_state, 1) ||
+	    wps_validate_manufacturer(attr.manufacturer, attr.manufacturer_len,
 				      1) ||
-	    wps_validate_model_name(attr->model_name, attr->model_name_len, 1) ||
-	    wps_validate_model_number(attr->model_number, attr->model_number_len,
+	    wps_validate_model_name(attr.model_name, attr.model_name_len, 1) ||
+	    wps_validate_model_number(attr.model_number, attr.model_number_len,
 				      1) ||
-	    wps_validate_serial_number(attr->serial_number,
-				       attr->serial_number_len, 1) ||
-	    wps_validate_primary_dev_type(attr->primary_dev_type, 1) ||
-	    wps_validate_dev_name(attr->dev_name, attr->dev_name_len, 1) ||
-	    wps_validate_rf_bands(attr->rf_bands, 1) ||
-	    wps_validate_assoc_state(attr->assoc_state, 1) ||
-	    wps_validate_dev_password_id(attr->dev_password_id, 1) ||
-	    wps_validate_config_error(attr->config_error, 1) ||
-	    wps_validate_os_version(attr->os_version, 1) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_request_to_enroll(attr->request_to_enroll, 0)) {
+	    wps_validate_serial_number(attr.serial_number,
+				       attr.serial_number_len, 1) ||
+	    wps_validate_primary_dev_type(attr.primary_dev_type, 1) ||
+	    wps_validate_dev_name(attr.dev_name, attr.dev_name_len, 1) ||
+	    wps_validate_rf_bands(attr.rf_bands, 1) ||
+	    wps_validate_assoc_state(attr.assoc_state, 1) ||
+	    wps_validate_dev_password_id(attr.dev_password_id, 1) ||
+	    wps_validate_config_error(attr.config_error, 1) ||
+	    wps_validate_os_version(attr.os_version, 1) ||
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_request_to_enroll(attr.request_to_enroll, 0)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M1");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m2(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
-
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M2");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M2");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_enrollee_nonce(attr->enrollee_nonce, 1) ||
-	    wps_validate_registrar_nonce(attr->registrar_nonce, 1) ||
-	    wps_validate_uuid_r(attr->uuid_r, 1) ||
-	    wps_validate_public_key(attr->public_key, attr->public_key_len, 1) ||
-	    wps_validate_auth_type_flags(attr->auth_type_flags, 1) ||
-	    wps_validate_encr_type_flags(attr->encr_type_flags, 1) ||
-	    wps_validate_conn_type_flags(attr->conn_type_flags, 1) ||
-	    wps_validate_config_methods(attr->config_methods, wps2, 1) ||
-	    wps_validate_manufacturer(attr->manufacturer, attr->manufacturer_len,
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_enrollee_nonce(attr.enrollee_nonce, 1) ||
+	    wps_validate_registrar_nonce(attr.registrar_nonce, 1) ||
+	    wps_validate_uuid_r(attr.uuid_r, 1) ||
+	    wps_validate_public_key(attr.public_key, attr.public_key_len, 1) ||
+	    wps_validate_auth_type_flags(attr.auth_type_flags, 1) ||
+	    wps_validate_encr_type_flags(attr.encr_type_flags, 1) ||
+	    wps_validate_conn_type_flags(attr.conn_type_flags, 1) ||
+	    wps_validate_config_methods(attr.config_methods, wps2, 1) ||
+	    wps_validate_manufacturer(attr.manufacturer, attr.manufacturer_len,
 				      1) ||
-	    wps_validate_model_name(attr->model_name, attr->model_name_len, 1) ||
-	    wps_validate_model_number(attr->model_number, attr->model_number_len,
+	    wps_validate_model_name(attr.model_name, attr.model_name_len, 1) ||
+	    wps_validate_model_number(attr.model_number, attr.model_number_len,
 				      1) ||
-	    wps_validate_serial_number(attr->serial_number,
-				       attr->serial_number_len, 1) ||
-	    wps_validate_primary_dev_type(attr->primary_dev_type, 1) ||
-	    wps_validate_dev_name(attr->dev_name, attr->dev_name_len, 1) ||
-	    wps_validate_rf_bands(attr->rf_bands, 1) ||
-	    wps_validate_assoc_state(attr->assoc_state, 1) ||
-	    wps_validate_config_error(attr->config_error, 1) ||
-	    wps_validate_dev_password_id(attr->dev_password_id, 1) ||
-	    wps_validate_os_version(attr->os_version, 1) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_authenticator(attr->authenticator, 1)) {
+	    wps_validate_serial_number(attr.serial_number,
+				       attr.serial_number_len, 1) ||
+	    wps_validate_primary_dev_type(attr.primary_dev_type, 1) ||
+	    wps_validate_dev_name(attr.dev_name, attr.dev_name_len, 1) ||
+	    wps_validate_rf_bands(attr.rf_bands, 1) ||
+	    wps_validate_assoc_state(attr.assoc_state, 1) ||
+	    wps_validate_config_error(attr.config_error, 1) ||
+	    wps_validate_dev_password_id(attr.dev_password_id, 1) ||
+	    wps_validate_os_version(attr.os_version, 1) ||
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_authenticator(attr.authenticator, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M2");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m2d(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M2D");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M2D");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_enrollee_nonce(attr->enrollee_nonce, 1) ||
-	    wps_validate_registrar_nonce(attr->registrar_nonce, 1) ||
-	    wps_validate_uuid_r(attr->uuid_r, 1) ||
-	    wps_validate_auth_type_flags(attr->auth_type_flags, 1) ||
-	    wps_validate_encr_type_flags(attr->encr_type_flags, 1) ||
-	    wps_validate_conn_type_flags(attr->conn_type_flags, 1) ||
-	    wps_validate_config_methods(attr->config_methods, wps2, 1) ||
-	    wps_validate_manufacturer(attr->manufacturer, attr->manufacturer_len,
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_enrollee_nonce(attr.enrollee_nonce, 1) ||
+	    wps_validate_registrar_nonce(attr.registrar_nonce, 1) ||
+	    wps_validate_uuid_r(attr.uuid_r, 1) ||
+	    wps_validate_auth_type_flags(attr.auth_type_flags, 1) ||
+	    wps_validate_encr_type_flags(attr.encr_type_flags, 1) ||
+	    wps_validate_conn_type_flags(attr.conn_type_flags, 1) ||
+	    wps_validate_config_methods(attr.config_methods, wps2, 1) ||
+	    wps_validate_manufacturer(attr.manufacturer, attr.manufacturer_len,
 				      1) ||
-	    wps_validate_model_name(attr->model_name, attr->model_name_len, 1) ||
-	    wps_validate_model_number(attr->model_number, attr->model_number_len,
+	    wps_validate_model_name(attr.model_name, attr.model_name_len, 1) ||
+	    wps_validate_model_number(attr.model_number, attr.model_number_len,
 				      1) ||
-	    wps_validate_serial_number(attr->serial_number,
-				       attr->serial_number_len, 1) ||
-	    wps_validate_primary_dev_type(attr->primary_dev_type, 1) ||
-	    wps_validate_dev_name(attr->dev_name, attr->dev_name_len, 1) ||
-	    wps_validate_rf_bands(attr->rf_bands, 1) ||
-	    wps_validate_assoc_state(attr->assoc_state, 1) ||
-	    wps_validate_config_error(attr->config_error, 1) ||
-	    wps_validate_os_version(attr->os_version, 1) ||
-	    wps_validate_version2(attr->version2, wps2)) {
+	    wps_validate_serial_number(attr.serial_number,
+				       attr.serial_number_len, 1) ||
+	    wps_validate_primary_dev_type(attr.primary_dev_type, 1) ||
+	    wps_validate_dev_name(attr.dev_name, attr.dev_name_len, 1) ||
+	    wps_validate_rf_bands(attr.rf_bands, 1) ||
+	    wps_validate_assoc_state(attr.assoc_state, 1) ||
+	    wps_validate_config_error(attr.config_error, 1) ||
+	    wps_validate_os_version(attr.os_version, 1) ||
+	    wps_validate_version2(attr.version2, wps2)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M2D");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m3(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M3");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M3");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_registrar_nonce(attr->registrar_nonce, 1) ||
-	    wps_validate_e_hash1(attr->e_hash1, 1) ||
-	    wps_validate_e_hash2(attr->e_hash2, 1) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_authenticator(attr->authenticator, 1)) {
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_registrar_nonce(attr.registrar_nonce, 1) ||
+	    wps_validate_e_hash1(attr.e_hash1, 1) ||
+	    wps_validate_e_hash2(attr.e_hash2, 1) ||
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_authenticator(attr.authenticator, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M3");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m4(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M4");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M4");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_enrollee_nonce(attr->enrollee_nonce, 1) ||
-	    wps_validate_r_hash1(attr->r_hash1, 1) ||
-	    wps_validate_r_hash2(attr->r_hash2, 1) ||
-	    wps_validate_encr_settings(attr->encr_settings,
-				       attr->encr_settings_len, 1) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_authenticator(attr->authenticator, 1)) {
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_enrollee_nonce(attr.enrollee_nonce, 1) ||
+	    wps_validate_r_hash1(attr.r_hash1, 1) ||
+	    wps_validate_r_hash2(attr.r_hash2, 1) ||
+	    wps_validate_encr_settings(attr.encr_settings,
+				       attr.encr_settings_len, 1) ||
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_authenticator(attr.authenticator, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M4");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m4_encr(const struct wpabuf *tlvs, int wps2)
 {
-	struct wps_parse_attr *attr;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
-
+	struct wps_parse_attr attr;
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M4 encrypted "
 			   "settings");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M4 encrypted settings");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	if (wps_validate_r_snonce1(attr->r_snonce1, 1) ||
-	    wps_validate_key_wrap_auth(attr->key_wrap_auth, 1)) {
+	if (wps_validate_r_snonce1(attr.r_snonce1, 1) ||
+	    wps_validate_key_wrap_auth(attr.key_wrap_auth, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M4 encrypted "
 			   "settings");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m5(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M5");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M5");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_registrar_nonce(attr->registrar_nonce, 1) ||
-	    wps_validate_encr_settings(attr->encr_settings,
-				       attr->encr_settings_len, 1) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_authenticator(attr->authenticator, 1)) {
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_registrar_nonce(attr.registrar_nonce, 1) ||
+	    wps_validate_encr_settings(attr.encr_settings,
+				       attr.encr_settings_len, 1) ||
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_authenticator(attr.authenticator, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M5");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m5_encr(const struct wpabuf *tlvs, int wps2)
 {
-	struct wps_parse_attr *attr;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
+	struct wps_parse_attr attr;
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M5 encrypted "
 			   "settings");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M5 encrypted settings");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	if (wps_validate_e_snonce1(attr->e_snonce1, 1) ||
-	    wps_validate_key_wrap_auth(attr->key_wrap_auth, 1)) {
+	if (wps_validate_e_snonce1(attr.e_snonce1, 1) ||
+	    wps_validate_key_wrap_auth(attr.key_wrap_auth, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M5 encrypted "
 			   "settings");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m6(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M6");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M6");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_enrollee_nonce(attr->enrollee_nonce, 1) ||
-	    wps_validate_encr_settings(attr->encr_settings,
-				       attr->encr_settings_len, 1) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_authenticator(attr->authenticator, 1)) {
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_enrollee_nonce(attr.enrollee_nonce, 1) ||
+	    wps_validate_encr_settings(attr.encr_settings,
+				       attr.encr_settings_len, 1) ||
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_authenticator(attr.authenticator, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M6");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m6_encr(const struct wpabuf *tlvs, int wps2)
 {
-	struct wps_parse_attr *attr;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
+	struct wps_parse_attr attr;
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M6 encrypted "
 			   "settings");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M6 encrypted settings");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	if (wps_validate_r_snonce2(attr->r_snonce2, 1) ||
-	    wps_validate_key_wrap_auth(attr->key_wrap_auth, 1)) {
+	if (wps_validate_r_snonce2(attr.r_snonce2, 1) ||
+	    wps_validate_key_wrap_auth(attr.key_wrap_auth, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M6 encrypted "
 			   "settings");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m7(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M7");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M7");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_registrar_nonce(attr->registrar_nonce, 1) ||
-	    wps_validate_encr_settings(attr->encr_settings,
-				       attr->encr_settings_len, 1) ||
-	    wps_validate_settings_delay_time(attr->settings_delay_time, 0) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_authenticator(attr->authenticator, 1)) {
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_registrar_nonce(attr.registrar_nonce, 1) ||
+	    wps_validate_encr_settings(attr.encr_settings,
+				       attr.encr_settings_len, 1) ||
+	    wps_validate_settings_delay_time(attr.settings_delay_time, 0) ||
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_authenticator(attr.authenticator, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M7");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m7_encr(const struct wpabuf *tlvs, int ap, int wps2)
 {
-	struct wps_parse_attr *attr;
-	int ret;
+	struct wps_parse_attr attr;
 
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
-	
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M7 encrypted "
 			   "settings");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M7 encrypted settings");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	if (wps_validate_e_snonce2(attr->e_snonce2, 1) ||
-	    wps_validate_ssid(attr->ssid, attr->ssid_len, !ap) ||
-	    wps_validate_mac_addr(attr->mac_addr, !ap) ||
-	    wps_validate_auth_type(attr->auth_type, !ap) ||
-	    wps_validate_encr_type(attr->encr_type, !ap) ||
-	    wps_validate_network_key_index(attr->network_key_idx, 0) ||
-	    wps_validate_network_key(attr->network_key, attr->network_key_len,
-				     attr->encr_type, !ap) ||
-	    wps_validate_key_wrap_auth(attr->key_wrap_auth, 1)) {
+	if (wps_validate_e_snonce2(attr.e_snonce2, 1) ||
+	    wps_validate_ssid(attr.ssid, attr.ssid_len, !ap) ||
+	    wps_validate_mac_addr(attr.mac_addr, !ap) ||
+	    wps_validate_auth_type(attr.auth_type, !ap) ||
+	    wps_validate_encr_type(attr.encr_type, !ap) ||
+	    wps_validate_network_key_index(attr.network_key_idx, 0) ||
+	    wps_validate_network_key(attr.network_key, attr.network_key_len,
+				     attr.encr_type, !ap) ||
+	    wps_validate_key_wrap_auth(attr.key_wrap_auth, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M7 encrypted "
 			   "settings");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m8(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M8");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M8");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_enrollee_nonce(attr->enrollee_nonce, 1) ||
-	    wps_validate_encr_settings(attr->encr_settings,
-				       attr->encr_settings_len, 1) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_authenticator(attr->authenticator, 1)) {
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_enrollee_nonce(attr.enrollee_nonce, 1) ||
+	    wps_validate_encr_settings(attr.encr_settings,
+				       attr.encr_settings_len, 1) ||
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_authenticator(attr.authenticator, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M8");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_m8_encr(const struct wpabuf *tlvs, int ap, int wps2)
 {
-	struct wps_parse_attr *attr;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
+	struct wps_parse_attr attr;
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in M8 encrypted "
 			   "settings");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in M8 encrypted settings");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	if (wps_validate_ssid(attr->ssid, attr->ssid_len, ap) ||
-	    wps_validate_auth_type(attr->auth_type, ap) ||
-	    wps_validate_encr_type(attr->encr_type, ap) ||
-	    wps_validate_network_key_index(attr->network_key_idx, 0) ||
-	    wps_validate_mac_addr(attr->mac_addr, ap) ||
-	    wps_validate_credential(attr->cred, attr->cred_len, attr->num_cred,
+	if (wps_validate_ssid(attr.ssid, attr.ssid_len, ap) ||
+	    wps_validate_auth_type(attr.auth_type, ap) ||
+	    wps_validate_encr_type(attr.encr_type, ap) ||
+	    wps_validate_network_key_index(attr.network_key_idx, 0) ||
+	    wps_validate_mac_addr(attr.mac_addr, ap) ||
+	    wps_validate_credential(attr.cred, attr.cred_len, attr.num_cred,
 				    !ap) ||
-	    wps_validate_key_wrap_auth(attr->key_wrap_auth, 1)) {
+	    wps_validate_key_wrap_auth(attr.key_wrap_auth, 1)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid M8 encrypted "
 			   "settings");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_wsc_ack(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in WSC_ACK");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in WSC_ACK");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_enrollee_nonce(attr->enrollee_nonce, 1) ||
-	    wps_validate_registrar_nonce(attr->registrar_nonce, 1) ||
-	    wps_validate_version2(attr->version2, wps2)) {
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_enrollee_nonce(attr.enrollee_nonce, 1) ||
+	    wps_validate_registrar_nonce(attr.registrar_nonce, 1) ||
+	    wps_validate_version2(attr.version2, wps2)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid WSC_ACK");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_wsc_nack(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in WSC_NACK");
-		ret = -1;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in WSC_NACK");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_enrollee_nonce(attr->enrollee_nonce, 1) ||
-	    wps_validate_registrar_nonce(attr->registrar_nonce, 1) ||
-	    wps_validate_config_error(attr->config_error, 1) ||
-	    wps_validate_version2(attr->version2, wps2)) {
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_enrollee_nonce(attr.enrollee_nonce, 1) ||
+	    wps_validate_registrar_nonce(attr.registrar_nonce, 1) ||
+	    wps_validate_config_error(attr.config_error, 1) ||
+	    wps_validate_version2(attr.version2, wps2)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid WSC_NACK");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		goto _out;
-		ret =  -1;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_wsc_done(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in WSC_Done");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in WSC_Done");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_msg_type(attr->msg_type, 1) ||
-	    wps_validate_enrollee_nonce(attr->enrollee_nonce, 1) ||
-	    wps_validate_registrar_nonce(attr->registrar_nonce, 1) ||
-	    wps_validate_version2(attr->version2, wps2)) {
+	wps2 = attr.version2 != NULL;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_msg_type(attr.msg_type, 1) ||
+	    wps_validate_enrollee_nonce(attr.enrollee_nonce, 1) ||
+	    wps_validate_registrar_nonce(attr.registrar_nonce, 1) ||
+	    wps_validate_version2(attr.version2, wps2)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid WSC_Done");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret = -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }
 
 
 int wps_validate_upnp_set_selected_registrar(const struct wpabuf *tlvs)
 {
-	struct wps_parse_attr *attr;
+	struct wps_parse_attr attr;
 	int wps2;
 	int sel_reg;
-	int ret;
-
-	attr = (struct wps_parse_attr *)os_zalloc(sizeof(struct wps_parse_attr));
-	if (attr == NULL) {
-		ret = -99;
-		goto _out;
-	}
 
 	if (tlvs == NULL) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: No TLVs in "
 			   "SetSelectedRegistrar");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
-	if (wps_parse_msg(tlvs, attr) < 0) {
+	if (wps_parse_msg(tlvs, &attr) < 0) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Failed to parse attributes "
 			   "in SetSelectedRegistrar");
-		ret = -1;
-		goto _out;
+		return -1;
 	}
 
-	wps2 = attr->version2 != NULL;
-	sel_reg = attr->selected_registrar != NULL &&
-		*attr->selected_registrar != 0;
-	if (wps_validate_version(attr->version, 1) ||
-	    wps_validate_dev_password_id(attr->dev_password_id, sel_reg) ||
-	    wps_validate_sel_reg_config_methods(attr->sel_reg_config_methods,
+	wps2 = attr.version2 != NULL;
+	sel_reg = attr.selected_registrar != NULL &&
+		*attr.selected_registrar != 0;
+	if (wps_validate_version(attr.version, 1) ||
+	    wps_validate_dev_password_id(attr.dev_password_id, sel_reg) ||
+	    wps_validate_sel_reg_config_methods(attr.sel_reg_config_methods,
 						wps2, sel_reg) ||
-	    wps_validate_version2(attr->version2, wps2) ||
-	    wps_validate_authorized_macs(attr->authorized_macs,
-					 attr->authorized_macs_len, wps2) ||
-	    wps_validate_uuid_r(attr->uuid_r, wps2)) {
+	    wps_validate_version2(attr.version2, wps2) ||
+	    wps_validate_authorized_macs(attr.authorized_macs,
+					 attr.authorized_macs_len, wps2) ||
+	    wps_validate_uuid_r(attr.uuid_r, wps2)) {
 		wpa_printf(MSG_INFO, "WPS-STRICT: Invalid "
 			   "SetSelectedRegistrar");
 #ifdef WPS_STRICT_WPS2
-		if (wps2) {
-			ret = -1;
-			goto _out;
-		}
+		if (wps2)
+			return -1;
 #else /* WPS_STRICT_WPS2 */
-		ret -1;
-		goto _out;
+		return -1;
 #endif /* WPS_STRICT_WPS2 */
 	}
 
-	ret = 0;
-_out:
-	if (attr)
-		os_free(attr);
-
-	return ret;
+	return 0;
 }

@@ -11,6 +11,7 @@
 #include "common.h"
 #include "crypto.h"
 
+#if defined(WOLFSSL_NOTESP)
 /* wolfSSL headers */
 #include <wolfssl/options.h>
 #include <wolfssl/wolfcrypt/md4.h>
@@ -29,10 +30,39 @@
 #include <wolfssl/wolfcrypt/asn_public.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/openssl/bn.h>
+#else
+/* wolfSSL headers */
+//#include <esp-wolfssl/options.h>
+//#include <wolfssl/options.h>
+#include <user_settings.h>
+#include <wolfssl/wolfcrypt/md4.h>
+#include <wolfssl/wolfcrypt/md5.h>
+#include <wolfssl/wolfcrypt/sha.h>
+#include <wolfssl/wolfcrypt/sha256.h>
+#include <wolfssl/wolfcrypt/sha512.h>
+#include <wolfssl/wolfcrypt/hmac.h>
+#include <wolfssl/wolfcrypt/pwdbased.h>
+#include <wolfssl/wolfcrypt/arc4.h>
+#include <wolfssl/wolfcrypt/des3.h>
+#include <wolfssl/wolfcrypt/aes.h>
+#include <wolfssl/wolfcrypt/dh.h>
+#include <wolfssl/wolfcrypt/cmac.h>
+#include <wolfssl/wolfcrypt/ecc.h>
+#include <wolfssl/wolfcrypt/asn_public.h>
+#include <wolfssl/wolfcrypt/error-crypt.h>
+#include <wolfssl/openssl/bn.h>
+#endif
 
+
+int TEST_FAIL ()
+{
+    ESP_LOGD(TAG, "TEST_FAIL not implemented");
+    return 0;
+}
 
 #ifndef CONFIG_FIPS
 
+#ifndef NO_MD4
 int md4_vector(size_t num_elem, const u8 *addr[], const size_t *len, u8 *mac)
 {
 	Md4 md4;
@@ -69,6 +99,7 @@ int md5_vector(size_t num_elem, const u8 *addr[], const size_t *len, u8 *mac)
 
 	return 0;
 }
+#endif
 
 #endif /* CONFIG_FIPS */
 
@@ -100,7 +131,8 @@ int sha256_vector(size_t num_elem, const u8 *addr[], const size_t *len,
 	wc_Sha256 sha256;
 	size_t i;
 
-	if (TEST_FAIL())
+
+    if (TEST_FAIL())
 		return -1;
 
 	wc_InitSha256(&sha256);
@@ -343,10 +375,10 @@ void * aes_encrypt_init(const u8 *key, size_t len)
 }
 
 
-int aes_encrypt(void *ctx, const u8 *plain, u8 *crypt)
+void aes_encrypt(void *ctx, const u8 *plain, u8 *crypt)
 {
 	wc_AesEncryptDirect(ctx, crypt, plain);
-	return 0;
+	//return 0;
 }
 
 
@@ -376,10 +408,10 @@ void * aes_decrypt_init(const u8 *key, size_t len)
 }
 
 
-int aes_decrypt(void *ctx, const u8 *crypt, u8 *plain)
+void aes_decrypt(void *ctx, const u8 *crypt, u8 *plain)
 {
 	wc_AesDecryptDirect(ctx, plain, crypt);
-	return 0;
+	// return 0;
 }
 
 
@@ -810,6 +842,11 @@ void dh5_free(void *ctx)
 #endif /* CONFIG_WPS */
 
 
+#if defined(NO_DH)
+    oops!
+#endif
+
+
 int crypto_dh_init(u8 generator, const u8 *prime, size_t prime_len, u8 *privkey,
 		   u8 *pubkey)
 {
@@ -1227,17 +1264,17 @@ int crypto_bignum_div(const struct crypto_bignum *a,
 }
 
 
-int crypto_bignum_addmod(const struct crypto_bignum *a,
-			 const struct crypto_bignum *b,
-			 const struct crypto_bignum *c,
-			 struct crypto_bignum *d)
-{
-	if (TEST_FAIL())
-		return -1;
-
-	return mp_addmod((mp_int *) a, (mp_int *) b, (mp_int *) c,
-			 (mp_int *) d) == MP_OKAY ?  0 : -1;
-}
+//int crypto_bignum_addmod(const struct crypto_bignum *a,
+//			 const struct crypto_bignum *b,
+//			 const struct crypto_bignum *c,
+//			 struct crypto_bignum *d)
+//{
+//	if (TEST_FAIL())
+//		return -1;
+//
+//	return mp_addmod((mp_int *) a, (mp_int *) b, (mp_int *) c,
+//			 (mp_int *) d) == MP_OKAY ?  0 : -1;
+//}
 
 
 int crypto_bignum_mulmod(const struct crypto_bignum *a,
@@ -1716,50 +1753,50 @@ struct crypto_ecdh {
 	WC_RNG rng;
 };
 
-struct crypto_ecdh * crypto_ecdh_init(int group)
-{
-	struct crypto_ecdh *ecdh = NULL;
-	int ret;
-
-	ecdh = os_zalloc(sizeof(*ecdh));
-	if (!ecdh)
-		goto fail;
-
-	if (wc_InitRng(&ecdh->rng) != 0)
-		goto fail;
-
-	ecdh->ec = crypto_ec_init(group);
-	if (!ecdh->ec)
-		goto fail;
-
-	ret = wc_ecc_make_key_ex(&ecdh->rng, ecdh->ec->key.dp->size,
-				 &ecdh->ec->key, ecdh->ec->key.dp->id);
-	if (ret < 0)
-		goto fail;
-
-#if defined(ECC_TIMING_RESISTANT) && !defined(CONFIG_FIPS)
-	ret = wc_ecc_set_rng(&ecdh->ec->key, &ecdh->rng);
-	if (ret < 0)
-		goto fail;
-#endif /* ECC_TIMING_RESISTANT && !CONFIG_FIPS */
-
-done:
-	return ecdh;
-fail:
-	crypto_ecdh_deinit(ecdh);
-	ecdh = NULL;
-	goto done;
-}
-
-
-void crypto_ecdh_deinit(struct crypto_ecdh *ecdh)
-{
-	if (ecdh) {
-		crypto_ec_deinit(ecdh->ec);
-		wc_FreeRng(&ecdh->rng);
-		os_free(ecdh);
-	}
-}
+//struct crypto_ecdh * crypto_ecdh_init(int group)
+//{
+//	struct crypto_ecdh *ecdh = NULL;
+//	int ret;
+//
+//	ecdh = os_zalloc(sizeof(*ecdh));
+//	if (!ecdh)
+//		goto fail;
+//
+//	if (wc_InitRng(&ecdh->rng) != 0)
+//		goto fail;
+//
+//	ecdh->ec = crypto_ec_init(group);
+//	if (!ecdh->ec)
+//		goto fail;
+//
+//	ret = wc_ecc_make_key_ex(&ecdh->rng, ecdh->ec->key.dp->size,
+//				 &ecdh->ec->key, ecdh->ec->key.dp->id);
+//	if (ret < 0)
+//		goto fail;
+//
+//#if defined(ECC_TIMING_RESISTANT) && !defined(CONFIG_FIPS)
+//	ret = wc_ecc_set_rng(&ecdh->ec->key, &ecdh->rng);
+//	if (ret < 0)
+//		goto fail;
+//#endif /* ECC_TIMING_RESISTANT && !CONFIG_FIPS */
+//
+//done:
+//	return ecdh;
+//fail:
+//	crypto_ecdh_deinit(ecdh);
+//	ecdh = NULL;
+//	goto done;
+//}
+//
+//
+//void crypto_ecdh_deinit(struct crypto_ecdh *ecdh)
+//{
+//	if (ecdh) {
+//		crypto_ec_deinit(ecdh->ec);
+//		wc_FreeRng(&ecdh->rng);
+//		os_free(ecdh);
+//	}
+//}
 
 
 struct wpabuf * crypto_ecdh_get_pubkey(struct crypto_ecdh *ecdh, int inc_y)
@@ -1854,36 +1891,36 @@ struct crypto_ec_key {
 };
 
 
-static struct crypto_ec_key * crypto_ec_key_init(void)
-{
-	struct crypto_ec_key *key;
-
-	key = os_zalloc(sizeof(struct crypto_ec_key));
-	if (key) {
-#ifdef CONFIG_FIPS
-		key->eckey = os_zalloc(sizeof(ecc_key));
-#else /* CONFIG_FIPS */
-		key->eckey = wc_ecc_key_new(NULL);
-#endif /* CONFIG_FIPS */
-		/* Omit key->rng initialization because it seeds itself and thus
-		 * consumes entropy that may never be used. Lazy initialize when
-		 * necessary. */
-		if (!key->eckey) {
-			wpa_printf(MSG_ERROR,
-				   "wolfSSL: crypto_ec_key_init() failed");
-			crypto_ec_key_deinit(key);
-			key = NULL;
-		}
-#ifdef CONFIG_FIPS
-		else if (wc_ecc_init_ex(key->eckey, NULL, INVALID_DEVID) != 0) {
-			wpa_printf(MSG_ERROR, "wolfSSL: wc_ecc_init_ex failed");
-			crypto_ec_key_deinit(key);
-			key = NULL;
-		}
-#endif /* CONFIG_FIPS */
-	}
-	return key;
-}
+//static struct crypto_ec_key * crypto_ec_key_init(void)
+//{
+//	struct crypto_ec_key *key;
+//
+//	key = os_zalloc(sizeof(struct crypto_ec_key));
+//	if (key) {
+//#ifdef CONFIG_FIPS
+//		key->eckey = os_zalloc(sizeof(ecc_key));
+//#else /* CONFIG_FIPS */
+//		key->eckey = wc_ecc_key_new(NULL);
+//#endif /* CONFIG_FIPS */
+//		/* Omit key->rng initialization because it seeds itself and thus
+//		 * consumes entropy that may never be used. Lazy initialize when
+//		 * necessary. */
+//		if (!key->eckey) {
+//			wpa_printf(MSG_ERROR,
+//				   "wolfSSL: crypto_ec_key_init() failed");
+//			crypto_ec_key_deinit(key);
+//			key = NULL;
+//		}
+//#ifdef CONFIG_FIPS
+//		else if (wc_ecc_init_ex(key->eckey, NULL, INVALID_DEVID) != 0) {
+//			wpa_printf(MSG_ERROR, "wolfSSL: wc_ecc_init_ex failed");
+//			crypto_ec_key_deinit(key);
+//			key = NULL;
+//		}
+//#endif /* CONFIG_FIPS */
+//	}
+//	return key;
+//}
 
 
 void crypto_ec_key_deinit(struct crypto_ec_key *key)
@@ -1901,29 +1938,29 @@ void crypto_ec_key_deinit(struct crypto_ec_key *key)
 }
 
 
-struct crypto_ec_key * crypto_ec_key_parse_priv(const u8 *der, size_t der_len)
-{
-	struct crypto_ec_key *ret;
-	word32 idx = 0;
-
-	ret = crypto_ec_key_init();
-	if (!ret) {
-		wpa_printf(MSG_ERROR, "wolfSSL: crypto_ec_key_init failed");
-		goto fail;
-	}
-
-	if (wc_EccPrivateKeyDecode(der, &idx, ret->eckey, (word32) der_len) !=
-	    0) {
-		wpa_printf(MSG_ERROR, "wolfSSL: wc_EccPrivateKeyDecode failed");
-		goto fail;
-	}
-
-	return ret;
-fail:
-	if (ret)
-		crypto_ec_key_deinit(ret);
-	return NULL;
-}
+//struct crypto_ec_key * crypto_ec_key_parse_priv(const u8 *der, size_t der_len)
+//{
+//	struct crypto_ec_key *ret;
+//	word32 idx = 0;
+//
+//	ret = crypto_ec_key_init();
+//	if (!ret) {
+//		wpa_printf(MSG_ERROR, "wolfSSL: crypto_ec_key_init failed");
+//		goto fail;
+//	}
+//
+//	if (wc_EccPrivateKeyDecode(der, &idx, ret->eckey, (word32) der_len) !=
+//	    0) {
+//		wpa_printf(MSG_ERROR, "wolfSSL: wc_EccPrivateKeyDecode failed");
+//		goto fail;
+//	}
+//
+//	return ret;
+//fail:
+//	if (ret)
+//		crypto_ec_key_deinit(ret);
+//	return NULL;
+//}
 
 
 int crypto_ec_key_group(struct crypto_ec_key *key)
@@ -1994,28 +2031,28 @@ fail:
 }
 
 
-struct crypto_ec_key * crypto_ec_key_parse_pub(const u8 *der, size_t der_len)
-{
-	word32 idx = 0;
-	struct crypto_ec_key *ret = NULL;
-
-	ret = crypto_ec_key_init();
-	if (!ret) {
-		wpa_printf(MSG_ERROR, "wolfSSL: crypto_ec_key_init failed");
-		goto fail;
-	}
-
-	if (wc_EccPublicKeyDecode(der, &idx, ret->eckey, (word32) der_len) != 0)
-	{
-		wpa_printf(MSG_ERROR, "wolfSSL: wc_EccPublicKeyDecode failed");
-		goto fail;
-	}
-
-	return ret;
-fail:
-	crypto_ec_key_deinit(ret);
-	return NULL;
-}
+//struct crypto_ec_key * crypto_ec_key_parse_pub(const u8 *der, size_t der_len)
+//{
+//	word32 idx = 0;
+//	struct crypto_ec_key *ret = NULL;
+//
+//	ret = crypto_ec_key_init();
+//	if (!ret) {
+//		wpa_printf(MSG_ERROR, "wolfSSL: crypto_ec_key_init failed");
+//		goto fail;
+//	}
+//
+//	if (wc_EccPublicKeyDecode(der, &idx, ret->eckey, (word32) der_len) != 0)
+//	{
+//		wpa_printf(MSG_ERROR, "wolfSSL: wc_EccPublicKeyDecode failed");
+//		goto fail;
+//	}
+//
+//	return ret;
+//fail:
+//	crypto_ec_key_deinit(ret);
+//	return NULL;
+//}
 
 
 struct wpabuf * crypto_ec_key_sign(struct crypto_ec_key *key, const u8 *data,

@@ -29,7 +29,7 @@
 #include "crypto/crypto.h"
 
 #include "utils/ext_password.h"
-#include "tls/tls.h"
+#include "tls.h"
 #include "eap_peer/eap_i.h"
 #include "eap_peer/eap_config.h"
 #include "eap_peer/eap.h"

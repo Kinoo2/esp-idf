@@ -1,3 +1,4 @@
+#include <tls/tls.h>
 /*
  * SSL/TLS interface functions for wolfSSL TLS case
  * Copyright (c) 2004-2017, Jouni Malinen <j@w1.fi>
@@ -15,7 +16,7 @@
 #include "tls.h"
 
 /* wolfSSL includes */
-#include <wolfssl/options.h>
+//#include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
 #include <wolfssl/error-ssl.h>
 #include <wolfssl/wolfcrypt/asn.h>

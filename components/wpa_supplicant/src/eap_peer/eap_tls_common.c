@@ -10,7 +10,7 @@
 
 #include "utils/common.h"
 #include "crypto/sha1.h"
-#include "tls/tls.h"
+#include "tls.h"
 #include "eap_peer/eap_i.h"
 #include "eap_peer/eap_tls_common.h"
 #include "eap_peer/eap_config.h"
@@ -254,7 +254,7 @@ u8 * eap_peer_tls_derive_key(struct eap_sm *sm, struct eap_ssl_data *data,
 	if (out == NULL)
 		return NULL;
 
-	if (tls_connection_export_key(data->ssl_ctx, data->conn, label, out,
+	if (tls_connection_export_key(data->ssl_ctx, data->conn, label, NULL, NULL, out,
 				len)) {
 		os_free(out);
 		return NULL;
@@ -523,7 +523,7 @@ static int eap_tls_process_output(struct eap_ssl_data *data, EapType eap_type,
 	if (*out_data == NULL) {
 	    printf("[Debug] out_data is null, return \n");
 		return -1;
-    } 
+    }
 
 	flags = wpabuf_put(*out_data, 1);
 	*flags = peap_version;
@@ -655,7 +655,7 @@ int eap_peer_tls_process_helper(struct eap_sm *sm, struct eap_ssl_data *data,
  */
 struct wpabuf * eap_peer_tls_build_ack(u8 id, EapType eap_type,
 				       int peap_version)
-{	
+{
 	struct wpabuf *resp;
 
 	resp = eap_tls_msg_alloc(eap_type, 1, EAP_CODE_RESPONSE, id);

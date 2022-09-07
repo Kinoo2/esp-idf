@@ -1,3 +1,5 @@
+#include <stddef.h>
+#include <utils/common.h>
 /*
  * Dynamic data buffer
  * Copyright (c) 2007-2009, Jouni Malinen <j@w1.fi>
