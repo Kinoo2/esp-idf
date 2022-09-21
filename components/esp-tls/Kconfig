@@ -1,7 +1,7 @@
 menu "ESP-TLS"
     choice ESP_TLS_LIBRARY_CHOOSE
         prompt "Choose SSL/TLS library for ESP-TLS (See help for more Info)"
-        default ESP_TLS_USING_MBEDTLS
+        default ESP_TLS_USING_WOLFSSL
         help
             The ESP-TLS APIs support multiple backend TLS libraries. Currently mbedTLS and WolfSSL are
             supported. Different TLS libraries may support different features and have different resource

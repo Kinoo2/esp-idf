@@ -332,8 +332,10 @@ int esp_wolfssl_handshake(esp_tls_t *tls, const esp_tls_cfg_t *cfg)
             ESP_INT_EVENT_TRACKER_CAPTURE(tls->error_handle, ERR_TYPE_WOLFSSL, -ret);
             ESP_INT_EVENT_TRACKER_CAPTURE(tls->error_handle, ERR_TYPE_ESP, ESP_ERR_WOLFSSL_SSL_HANDSHAKE_FAILED);
             if (cfg->cacert_buf != NULL || cfg->use_global_ca_store == true) {
+            #if defined(OPENSSL_EXTRA) || defined(OPENSSL_EXTRA_X509_SMALL)
                 /* This is to check whether handshake failed due to invalid certificate*/
                 esp_wolfssl_verify_certificate(tls);
+            #endif
             }
             tls->conn_state = ESP_TLS_FAIL;
             return -1;
@@ -377,6 +379,7 @@ ssize_t esp_wolfssl_write(esp_tls_t *tls, const char *data, size_t datalen)
     return ret;
 }
 
+#if defined(OPENSSL_EXTRA) || defined(OPENSSL_EXTRA_X509_SMALL)
 void esp_wolfssl_verify_certificate(esp_tls_t *tls)
 {
     int flags;
@@ -387,6 +390,7 @@ void esp_wolfssl_verify_certificate(esp_tls_t *tls)
         ESP_LOGI(TAG, "Certificate verified.");
     }
 }
+#endif
 
 ssize_t esp_wolfssl_get_bytes_avail(esp_tls_t *tls)
 {

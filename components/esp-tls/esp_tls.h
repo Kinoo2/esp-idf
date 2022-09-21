@@ -18,7 +18,10 @@
 #include <sys/socket.h>
 #include <fcntl.h>
 #include "esp_err.h"
-#ifdef CONFIG_ESP_TLS_USING_MBEDTLS
+#if defined(CONFIG_ESP_TLS_USING_WOLFSSL) && CONFIG_ESP_TLS_USING_WOLFSSL
+#include "wolfssl/wolfcrypt/settings.h"
+#include "wolfssl/ssl.h"
+#elif defined(CONFIG_ESP_TLS_USING_MBEDTLS) && CONFIG_ESP_TLS_USING_MBEDTLS
 #include "mbedtls/platform.h"
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/esp_debug.h"
@@ -27,9 +30,6 @@
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/error.h"
 #include "mbedtls/certs.h"
-#elif CONFIG_ESP_TLS_USING_WOLFSSL
-#include "wolfssl/wolfcrypt/settings.h"
-#include "wolfssl/ssl.h"
 #endif
 
 #ifdef __cplusplus
