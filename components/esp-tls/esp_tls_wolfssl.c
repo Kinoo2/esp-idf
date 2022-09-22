@@ -26,6 +26,8 @@
 #include "esp_tls_error_capture_internal.h"
 #include <errno.h>
 #include "esp_log.h"
+
+#include <wolfssl/wolfcrypt/settings.h> // make sure this appears before any other wolfSSL headers
 #include <wolfssl/ssl.h>
 
 static unsigned char *global_cacert = NULL;
