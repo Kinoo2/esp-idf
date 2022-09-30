@@ -321,9 +321,19 @@ static esp_err_t set_server_config(esp_tls_cfg_server_t *cfg, esp_tls_t *tls)
 int esp_wolfssl_handshake(esp_tls_t *tls, const esp_tls_cfg_t *cfg)
 {
     int ret;
-    ret = wolfSSL_connect( (WOLFSSL *)tls->priv_ssl);
+    ret = wolfSSL_connect((WOLFSSL *)tls->priv_ssl);
     if (ret == WOLFSSL_SUCCESS) {
+        WOLFSSL_CIPHER* cipher = wolfSSL_get_current_cipher((WOLFSSL*)tls->priv_ssl);
+        const char* name = wolfSSL_get_curve_name((WOLFSSL*)tls->priv_ssl);
+
         tls->conn_state = ESP_TLS_DONE;
+
+        ESP_LOGI(TAG, "TLS Version: %s", wolfSSL_get_version((WOLFSSL*)tls->priv_ssl));
+        ESP_LOGI(TAG, "TLS Cipher Suite: %s", wolfSSL_CIPHER_get_name(cipher));
+        if (name  != NULL) {
+            ESP_LOGI(TAG, "TLS Curve: %s", name);
+        }
+
         return 1;
     } else {
         int err = wolfSSL_get_error( (WOLFSSL *)tls->priv_ssl, ret);
