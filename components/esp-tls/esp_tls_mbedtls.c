@@ -125,6 +125,10 @@ int esp_mbedtls_handshake(esp_tls_t *tls, const esp_tls_cfg_t *cfg)
     ret = mbedtls_ssl_handshake(&tls->ssl);
     if (ret == 0) {
         tls->conn_state = ESP_TLS_DONE;
+
+        ESP_LOGI(TAG, "Task %s, Stack HWM: %d\n", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
+        heap_caps_print_heap_info(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+
         return 1;
     } else {
         if (ret != ESP_TLS_ERR_SSL_WANT_READ && ret != ESP_TLS_ERR_SSL_WANT_WRITE) {
