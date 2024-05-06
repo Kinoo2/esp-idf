@@ -65,13 +65,21 @@ DSTATUS ff_disk_status (BYTE pdrv)
 {
     return s_impls[pdrv]->status(pdrv);
 }
+
+void ioStatsRecord(bool isRead, const char *name, size_t numBlocks, int time, uint64_t timestamp);
 DRESULT ff_disk_read (BYTE pdrv, BYTE* buff, DWORD sector, UINT count)
 {
-    return s_impls[pdrv]->read(pdrv, buff, sector, count);
+    long long startTime = esp_timer_get_time();
+    DRESULT res = s_impls[pdrv]->read(pdrv, buff, sector, count);
+    ioStatsRecord(true, pcTaskGetName(NULL), count, esp_timer_get_time() - startTime, startTime);
+    return res;
 }
 DRESULT ff_disk_write (BYTE pdrv, const BYTE* buff, DWORD sector, UINT count)
 {
-    return s_impls[pdrv]->write(pdrv, buff, sector, count);
+    long long startTime = esp_timer_get_time();
+    DRESULT res =  s_impls[pdrv]->write(pdrv, buff, sector, count);
+    ioStatsRecord(false, pcTaskGetName(NULL), count, esp_timer_get_time() - startTime, startTime);
+    return res;
 }
 DRESULT ff_disk_ioctl (BYTE pdrv, BYTE cmd, void* buff)
 {
